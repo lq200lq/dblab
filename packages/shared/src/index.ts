@@ -1,0 +1,13 @@
+/** 平台与前端共享的唯一契约来源：错误码、审计词表、SQL 分类、IP 匹配、MCP 词表、DTO schema。 */
+export * from './errors'
+export * from './audit'
+export * from './mcp'
+export * from './sql/class'
+export * from './sql/classify'
+export * from './net/cidr'
+export * from './schemas/common'
+export * from './schemas/auth'
+export * from './schemas/datasource'
+export * from './schemas/introspection'
+export * from './schemas/api-key'
+export * from './schemas/audit-log'

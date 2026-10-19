@@ -1,0 +1,58 @@
+name: dblab
+
+services:
+  dblab:
+    build: .
+    ports:
+      - "18400:4000"
+    environment:
+      # 平台自身的库。默认连你在 .env 里给的库，compose 不自带数据库。
+      # 库在宿主机上时写 host.docker.internal（compose 已加 host-gateway）。
+      DATABASE_URL: ${DATABASE_URL:?请在 .env 里设置 DATABASE_URL（容器内访问宿主机用 host.docker.internal，不是 localhost）}
+      PORT: "4000"
+      WEB_DIST_DIR: /app/apps/web/dist
+      # 本地 http 访问必须让 cookie 不带 Secure，因此默认非 production。
+      NODE_ENV: ${NODE_ENV:-development}
+      ADMIN_USER: ${ADMIN_USER:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
+      CREDENTIAL_MASTER_KEY: ${CREDENTIAL_MASTER_KEY:-}
+      SESSION_TTL_MINUTES: ${SESSION_TTL_MINUTES:-720}
+      MCP_ALLOWED_HOSTS: ${MCP_ALLOWED_HOSTS:-localhost,127.0.0.1,[::1]}
+      MCP_MAX_SQL_BYTES: ${MCP_MAX_SQL_BYTES:-100000}
+      MCP_MAX_ROWS: ${MCP_MAX_ROWS:-500}
+      MCP_STATEMENT_TIMEOUT_MS: ${MCP_STATEMENT_TIMEOUT_MS:-15000}
+      POOL_MAX: ${POOL_MAX:-4}
+      POOL_IDLE_EVICT_MINUTES: ${POOL_IDLE_EVICT_MINUTES:-15}
+      TRUST_PROXY: ${TRUST_PROXY:-0}
+    volumes:
+      # 凭据主密钥落在这里；卷丢了既有数据源口令就全部解不开。
+      - dblab-data:/app/.data
+    # 容器里访问宿主机上被纳管的库时用 host.docker.internal。
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # 可选：自带一个平台库，给没有现成 PostgreSQL 的机器用。
+  # 启用：docker compose --profile bundled-db up -d
+  # 并把 .env 的 DATABASE_URL 指向它：
+  #   DATABASE_URL=postgresql://dblab:${DB_PASSWORD:-dblab_local_pw}@postgres:5432/dblab
+  postgres:
+    profiles: ["bundled-db"]
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: dblab
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-dblab_local_pw}
+      POSTGRES_DB: dblab
+    # 宿主机端口刻意选偏门号段，避开本机已有的 5432。
+    ports:
+      - "18432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dblab -d dblab"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  pgdata:
+  dblab-data:

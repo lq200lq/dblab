@@ -1,0 +1,32 @@
+{
+  "name": "dblab",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "DbLab — 面向 Agent 的数据库 MCP 管控平台",
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@10.18.1",
+  "scripts": {
+    "dev": "pnpm --filter @dblab/server --filter @dblab/web --parallel run dev",
+    "dev:server": "pnpm --filter @dblab/server dev",
+    "dev:web": "pnpm --filter @dblab/web dev",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "pnpm -r run test",
+    "db:generate": "pnpm --filter @dblab/db generate",
+    "db:migrate": "pnpm --filter @dblab/db migrate",
+    "db:seed": "pnpm --filter @dblab/db seed",
+    "dblab": "tsx apps/cli/src/index.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}

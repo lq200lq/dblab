@@ -1,0 +1,12 @@
+node_modules/
+dist/
+coverage/
+.vite/
+
+# 本地配置与凭据：主密钥文件也在这里，绝不能进版本库
+.env
+.env.local
+.data/
+
+*.log
+*.tsbuildinfo
