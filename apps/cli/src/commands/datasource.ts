@@ -1,4 +1,5 @@
 import { AdminApi, DEFAULT_PORT, ENGINE_LABEL, type DatasourceInput, type Engine } from '../core/admin-api'
+import { sourceLabel, type ConnectionSource } from '../core/connection-store'
 import { CliError } from '../core/errors'
 import { apiKeyPrefixOf, assertApiKeyShape, maskKey } from '../core/key'
 import type { Prompts } from '../core/prompts'
@@ -8,8 +9,10 @@ import type { CommandContext } from './shared'
 
 export interface DatasourceOptions {
   url?: string
-  /** 要授权的密钥明文——「注册的数据源自动授权给当前密钥」里的就是它。 */
-  key?: string
+  /** 要授权的密钥明文；由调用方解析（`--key` 或本机连接记录），到这里必须已经有了。 */
+  key: string
+  /** 只影响输出文案：让用户看清授权用的是哪来的那把密钥。 */
+  keySource?: ConnectionSource
   name?: string
   engine?: string
   host?: string
@@ -37,13 +40,6 @@ export async function runDatasource(
   options: DatasourceOptions,
 ): Promise<number> {
   const mcpUrl = normalizeMcpUrl(options.url ?? DEFAULT_SERVER_ORIGIN)
-  if (options.key === undefined) {
-    throw new CliError(
-      'usage',
-      '缺少 --key',
-      '注册后要自动授权给这把密钥，必须告诉 CLI 是哪一把（管控台创建时复制的明文）。',
-    )
-  }
   const apiKey = assertApiKeyShape(options.key)
 
   // 先确认管理员口令，再问一堆连接参数：免得用户填完六项才发现登不上。
@@ -55,7 +51,7 @@ export async function runDatasource(
   })
 
   ctx.out.plain(`管理面：${adminBaseUrlOf(mcpUrl)}`)
-  ctx.out.plain(`目标密钥：${maskKey(apiKey)}`)
+  ctx.out.plain(`目标密钥：${maskKey(apiKey)}（来自 ${sourceLabel(options.keySource ?? 'flag')}）`)
 
   await api.login(admin.user, admin.password)
   const target = await api.findApiKeyByPrefix(apiKeyPrefixOf(apiKey))

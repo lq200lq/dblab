@@ -42,10 +42,18 @@ export async function backupOnce(path: string): Promise<string | null> {
  * Windows 上目标文件常被正在运行的 Agent 进程占着，rename 会拿到 EPERM/EBUSY，
  * 所以重试几次；仍失败就明确告诉用户「关掉那个工具再试」，而不是抛原始 errno。
  */
-export async function writeAtomic(path: string, content: string): Promise<void> {
+export interface WriteAtomicOptions {
+  /**
+   * 目标文件的权限位，作用在临时文件上（rename 保留 inode）。
+   * Windows 上基本被忽略，所以这只算「尽力收紧」，不能当成保密手段。
+   */
+  mode?: number
+}
+
+export async function writeAtomic(path: string, content: string, options: WriteAtomicOptions = {}): Promise<void> {
   const dir = dirname(path)
   const tempPath = join(dir, `.${basename(path)}.dblab-${process.pid}-${Date.now()}.tmp`)
-  await writeFile(tempPath, content, 'utf8')
+  await writeFile(tempPath, content, { encoding: 'utf8', ...(options.mode !== undefined ? { mode: options.mode } : {}) })
 
   let lastError: unknown
   for (let attempt = 0; attempt < 3; attempt += 1) {

@@ -3,10 +3,12 @@ import { parseArgs } from 'node:util'
 
 import { runConnect } from './commands/connect'
 import { runDatasource } from './commands/datasource'
+import { runDatasourceList } from './commands/datasource-list'
 import { runDisconnect } from './commands/disconnect'
 import { runScan } from './commands/scan'
 import { runSetup } from './commands/setup'
 import type { CommandContext } from './commands/shared'
+import { resolveTarget } from './core/connection-store'
 import { CliError, EXIT_OK, EXIT_USAGE, isCliError } from './core/errors'
 import { createOutput, type Output } from './core/output'
 import { createPrompts, type Prompts } from './core/prompts'
@@ -56,10 +58,16 @@ const USAGE = `dblab ${CLI_VERSION} — 把本机的 Agent 客户端接到 DbLab
   dblab connect --key <密钥> [--url <地址>] [--agents <列表>] [--dry-run] [--skip-validate]
                                              非交互写入；--agents 省略时作用于全部已检测客户端
   dblab disconnect [--agents <列表>]         移除 dblab 条目（其余配置保留）
-  dblab datasource --key <密钥> [...]        注册数据源，并自动授权给这把密钥
+  dblab datasource [add] [...]               注册数据源，并自动授权给当前这把密钥
+  dblab datasource list [--key <密钥>]       列出这把密钥被授权的数据源与读写权限
 
 可选客户端 id：
   claude-code, cursor, codex, qoder, qoder-cn
+
+datasource 的 --key 可以省略：connect / setup 会把这次用的密钥与地址记在
+  ~/.dblab/config.json，省略时就用它（输出里会写明密钥是哪来的）。
+  显式传 --key 时地址仍按 --url 或默认值走，不会被记录里的地址带跑。
+  disconnect 不带 --agents 时连同这份记录一起清掉。
 
 datasource 的参数（省略必填项时走交互补齐）：
   --name <名字> --engine postgres|mysql --host <主机> --port <端口>
@@ -68,6 +76,9 @@ datasource 的参数（省略必填项时走交互补齐）：
   --admin-user <账号> --admin-password <口令>
                      建数据源与改授权只能用管理员会话；口令优先用环境变量
                      DBLAB_ADMIN_PASSWORD，目标库口令优先用 DBLAB_DB_PASSWORD
+
+datasource list 不用管理员口令：它就以那把密钥的身份连 /mcp，
+  列出的正是 Agent 实际能看到的视图。
 
 退出码：0 成功 / 1 校验失败 / 2 用法错误 / 3 写入或探测失败`
 
@@ -150,8 +161,30 @@ export async function main(argv: string[], options: MainOptions = {}): Promise<n
           ...(parsed.values.agents !== undefined ? { agents: parsed.values.agents } : {}),
         })
       case 'datasource': {
-        // 先把必填的 --key 拦下，别为了一个用法错误去加载交互库。
-        const key = requireFlag(parsed.values.key, '--key')
+        const sub = parsed.positionals[1]
+        if (sub !== undefined && sub !== 'add' && sub !== 'list') {
+          throw new CliError(
+            'usage',
+            `未知的 datasource 子命令：${sub}`,
+            '可用：add（省略子命令时就是它，注册并授权）、list（列出这把密钥的权限）。',
+          )
+        }
+
+        // 先把目标密钥拦下来，别为了一个用法错误去加载交互库。
+        const target = await resolveTarget({
+          homeDir: ctx.homeDir,
+          ...(parsed.values.url !== undefined ? { url: parsed.values.url } : {}),
+          ...(parsed.values.key !== undefined ? { key: parsed.values.key } : {}),
+        })
+
+        if (sub === 'list') {
+          return await runDatasourceList(ctx, {
+            mcpUrl: target.mcpUrl,
+            apiKey: target.apiKey,
+            keySource: target.source,
+          })
+        }
+
         // 只有这四项真的没法默认；host/port/口令有兜底值，缺了也不算「需要交互」。
         const required = {
           name: parsed.values.name,
@@ -163,9 +196,10 @@ export async function main(argv: string[], options: MainOptions = {}): Promise<n
         const prompts = options.prompts ?? (incomplete ? await createPrompts() : undefined)
 
         return await runDatasource(ctx, {
-          key,
+          key: target.apiKey,
+          keySource: target.source,
           ...compact({
-            url: parsed.values.url,
+            url: target.mcpUrl,
             name: parsed.values.name,
             engine: parsed.values.engine,
             host: parsed.values.host,
@@ -181,7 +215,11 @@ export async function main(argv: string[], options: MainOptions = {}): Promise<n
         })
       }
       default:
-        throw new CliError('usage', `未知命令：${command}`, '可用命令：setup、scan、connect、disconnect。')
+        throw new CliError(
+          'usage',
+          `未知命令：${command}`,
+          '可用命令：setup、scan、connect、disconnect、datasource（含 datasource list）。',
+        )
     }
   } catch (error) {
     return reportError(out, error)

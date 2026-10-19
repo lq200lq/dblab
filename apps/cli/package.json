@@ -1,6 +1,6 @@
 {
-  "name": "dblab",
-  "version": "0.1.0",
+  "name": "dblab-cli",
+  "version": "0.2.0",
   "description": "DbLab CLI — 扫描本机 Agent 并一键写入 MCP 配置",
   "type": "module",
   "license": "Apache-2.0",

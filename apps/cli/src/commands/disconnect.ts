@@ -1,3 +1,5 @@
+import { clearConnection, connectionConfigPath } from '../core/connection-store'
+
 import { printHeader, parseAgentIds, scanAgents, type CommandContext } from './shared'
 
 export interface DisconnectOptions {
@@ -15,6 +17,7 @@ export async function runDisconnect(ctx: CommandContext, options: DisconnectOpti
 
   if (targets.length === 0) {
     ctx.out.plain('没有找到需要移除的 dblab 配置。')
+    await forgetConnection(ctx, ids)
     return 0
   }
 
@@ -32,5 +35,18 @@ export async function runDisconnect(ctx: CommandContext, options: DisconnectOpti
   }
   ctx.out.plain('')
   ctx.out.plain(`共移除 ${removedCount} 处。`)
+  await forgetConnection(ctx, ids)
   return 0
+}
+
+/**
+ * 整体断开才清掉连接记录：`--agents` 只摘了几家时，其余客户端还在用同一把密钥连着，
+ * 那份记录仍然代表「当前连接」。
+ */
+async function forgetConnection(ctx: CommandContext, ids: string[] | undefined): Promise<void> {
+  if (ids !== undefined) return
+  if (await clearConnection(ctx.homeDir)) {
+    ctx.out.plain('')
+    ctx.out.plain(`已清除本机连接记录：${connectionConfigPath(ctx.homeDir)}`)
+  }
 }

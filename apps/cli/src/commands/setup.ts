@@ -1,4 +1,5 @@
 import { buildEntry } from '../adapters/types'
+import { connectionConfigPath, saveConnection } from '../core/connection-store'
 import { CliError } from '../core/errors'
 import { assertApiKeyShape, maskKey } from '../core/key'
 import type { Prompts } from '../core/prompts'
@@ -106,6 +107,11 @@ export async function runSetup(ctx: CommandContext, options: SetupOptions): Prom
     out.plain(`  ${target.adapter.displayName}  ${ACTION_LABEL[result.action]}  ${result.path}`)
     if (result.backupPath) out.plain(`    备份：${result.backupPath}`)
   }
+
+  await saveConnection(ctx.homeDir, { url: mcpUrl, key: apiKey })
+  out.plain('')
+  out.plain(`已记录本机连接：${maskKey(apiKey)} → ${mcpUrl}`)
+  out.plain(`  ${connectionConfigPath(ctx.homeDir)}`)
   out.plain('')
   out.plain('重启对应的 Agent 客户端即可加载 dblab 工具。')
   return 0

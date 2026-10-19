@@ -1,6 +1,11 @@
+import { mkdtemp } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 
 import { main } from '../src/cli'
+import { saveConnection } from '../src/core/connection-store'
 import type { Prompts } from '../src/core/prompts'
 
 const KEY = `dblab_ab12cd34_${'A'.repeat(43)}`
@@ -94,13 +99,13 @@ const FAKE_PROMPTS: Prompts = {
   confirm: async () => true,
 }
 
-async function run(argv: string[], fetchImpl?: typeof fetch, prompts?: Prompts) {
+async function run(argv: string[], fetchImpl?: typeof fetch, prompts?: Prompts, homeDir = '/tmp/unused') {
   const stdout = collector()
   const stderr = collector()
   const code = await main(argv, {
     stdout: stdout.stream,
     stderr: stderr.stream,
-    homeDir: '/tmp/unused',
+    homeDir,
     color: false,
     ...(fetchImpl ? { fetchImpl } : {}),
     ...(prompts ? { prompts } : {}),
@@ -337,6 +342,70 @@ describe('默认地址', () => {
     const { code } = await run(
       [...withoutUrl, '--url', 'http://localhost:4000', '--password', 'db-pw'],
       platform.impl,
+    )
+
+    expect(code).toBe(0)
+    expect(platform.calls[0]?.url).toBe('http://localhost:4000/api/v1/auth/login')
+  })
+})
+
+const CREATE_FLAGS = [
+  'datasource',
+  '--name',
+  'orders',
+  '--engine',
+  'postgres',
+  '--host',
+  'db.internal',
+  '--database',
+  'orders_db',
+  '--username',
+  'reader',
+]
+
+describe('省略 --key 时用本机连接记录', () => {
+  let home: string
+
+  beforeEach(async () => {
+    home = await mkdtemp(join(tmpdir(), 'dblab-cli-ds-'))
+    await saveConnection(home, { url: 'http://localhost:4100', key: KEY })
+  })
+
+  it('授权给记录里那把密钥，地址跟着记录走', async () => {
+    const platform = fakePlatform({})
+    const { code, out } = await run([...CREATE_FLAGS, '--password', 'db-pw'], platform.impl, undefined, home)
+
+    expect(code).toBe(0)
+    expect(platform.calls[0]?.url).toBe('http://localhost:4100/api/v1/auth/login')
+    expect(out).toContain('本机连接记录')
+    // 来源要写明，同时明文密钥一个字都不能出现
+    expect(out).not.toContain(KEY)
+    expect(out).toContain('dblab_ab12cd34_••••')
+    const put = platform.calls.find((c) => c.method === 'PUT')
+    expect(put?.body).toEqual({ grants: [{ datasourceId: 42, canRead: true, canWrite: false }] })
+  })
+
+  it('显式 --key 时地址不被记录带跑', async () => {
+    const platform = fakePlatform({})
+    const { code, out } = await run(
+      [...CREATE_FLAGS, '--key', KEY, '--password', 'db-pw'],
+      platform.impl,
+      undefined,
+      home,
+    )
+
+    expect(code).toBe(0)
+    expect(platform.calls[0]?.url).toBe('http://localhost:18400/api/v1/auth/login')
+    expect(out).toContain('来自 --key')
+  })
+
+  it('--url 仍然优先于记录', async () => {
+    const platform = fakePlatform({})
+    const { code } = await run(
+      [...CREATE_FLAGS, '--url', 'http://localhost:4000', '--password', 'db-pw'],
+      platform.impl,
+      undefined,
+      home,
     )
 
     expect(code).toBe(0)

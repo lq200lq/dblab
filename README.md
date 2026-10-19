@@ -93,15 +93,26 @@ pnpm dblab connect --key dblab_xxxx... --dry-run
 pnpm dblab connect --url http://10.0.0.8:18400 --key dblab_xxxx... --agents cursor,codex
 pnpm dblab disconnect --agents codex   # 只摘掉 dblab 条目
 
-# 注册数据源，并自动把它授权给这把密钥
+# 注册数据源，并自动把它授权给这把密钥（省略 --key 就用刚才连接的那把）
 DBLAB_ADMIN_PASSWORD=xxx DBLAB_DB_PASSWORD=yyy \
 pnpm dblab datasource --name orders --engine postgres \
   --host db.internal --database orders_db --username reader --key dblab_xxxx...
 pnpm dblab datasource --name orders --engine postgres --database orders_db \
-  --username reader --key dblab_xxxx... --write     # 顺带给写权限；省略参数则逐项来问
+  --username reader --write            # 顺带给写权限；省略参数则逐项来问
+
+# 列出这把密钥被授权的数据源与读写权限
+pnpm dblab datasource list
 ```
 
-`datasource` 需要管理员会话——平台只允许管理面建数据源与改授权，Agent 那把 API 密钥没有这两个权限。
+`datasource` 的 `--key` 可以省略：`connect` / `setup` 会把这次用的密钥与地址记在
+`~/.dblab/config.json`，省略时就用它，输出里也会写明这把密钥是哪来的。
+显式传 `--key` 时地址仍按 `--url` 或默认值走，不会被记录里的地址带跑；
+`disconnect` 不带 `--agents`（整体断开）时连同这份记录一起清掉。
+
+`datasource list` 不要管理员口令：它就以那把密钥的身份连 `/mcp` 调 `list_datasources`，
+列出来的正是 Agent 实际能看到的视图，没授权的库根本不出现在结果里。
+
+`datasource`（注册）需要管理员会话——平台只允许管理面建数据源与改授权，Agent 那把 API 密钥没有这两个权限。
 所以这里会登录一次 `admin`（`--admin-user` / `DBLAB_ADMIN_USER`，默认 `admin`）。
 两个口令都优先走环境变量：命令行明文会留在 shell 历史里。
 建之前一定先做一次连通性探测，**探测不过就不建库、不动授权**。
@@ -122,26 +133,27 @@ pnpm dblab datasource --name orders --engine postgres --database orders_db \
 
 写入约定：幂等（重复执行是原地更新）、保留缩进/换行/末尾换行、只改 `dblab` 那一处、
 首次写入前留一份 `<文件>.dblab.bak`、配置文件解析不了就整体不写。
-密钥明文会落到这些配置文件里（这是各客户端的既有形态），CLI 自己不做持久化。
+密钥明文会落到这些配置文件里（这是各客户端的既有形态），另外 CLI 自己也在
+`~/.dblab/config.json` 记一份当前连接的密钥与地址（落盘尽力收到 0600；Windows 上这个权限位基本被忽略）。
 所有输出里的密钥一律脱敏成 `dblab_<定位段>_••••`。
 
-CLI 是仓库里 `apps/cli` 这个包，发布到 npm 后就叫 **`dblab`**：
+CLI 是仓库里 `apps/cli` 这个包，发布到 npm 后叫 **`dblab-cli`**，装完命令仍是 `dblab`：
 
 ```bash
-npm install -g dblab     # 之后直接用 dblab setup / dblab scan ...
-npx dblab scan           # 或者不装，直接跑
+npm install -g dblab-cli  # 之后直接用 dblab setup / dblab scan ...
+npx dblab-cli scan        # 或者不装，直接跑
 ```
 
 在本仓库里开发与打包：
 
 ```bash
-pnpm --filter dblab build      # 产物 dist/index.js（带 shebang）
-pnpm --filter dblab test
+pnpm --filter dblab-cli build      # 产物 dist/index.js（带 shebang）
+pnpm --filter dblab-cli test
 cd apps/cli && npm pack --dry-run   # 只应含 dist/、LICENSE、README、package.json
 ```
 
-> 根包名是 `dblab-monorepo`，不叫 `dblab`：两者同名会让 `pnpm --filter dblab`
-> 同时匹配到根和 `apps/cli`，构建与发布时打错对象。
+> npm 上裸名 `dblab` 发不出去：registry 判定它与已有包 `lab`/`abab`/`delay` 过于相似。
+> 根包叫 `dblab-monorepo`，CLI 包叫 `dblab-cli`，filter 一律写全名。
 
 ### 手工配置（兜底）
 
@@ -276,7 +288,7 @@ cookie 会话不用为跨源再开 CORS。SPA 路由回退只对无扩展名的�
 pnpm typecheck              # 各包 tsc / vue-tsc
 pnpm test                   # 未设下面两个变量时，需要活库的用例整体跳过
 pnpm --filter @dblab/web build
-pnpm --filter dblab test      # CLI 单测全部注入临时 home，不碰真实用户配置
+pnpm --filter dblab-cli test      # CLI 单测全部注入临时 home，不碰真实用户配置
 ```
 
 跑需要真实库的用例时给两个测试库（都是本机 PostgreSQL）：

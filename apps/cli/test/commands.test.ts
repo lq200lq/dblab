@@ -7,8 +7,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { main, type MainOptions } from '../src/cli'
 import { runSetup } from '../src/commands/setup'
 import type { CommandContext } from '../src/commands/shared'
+import { loadConnection, saveConnection } from '../src/core/connection-store'
 import { createOutput } from '../src/core/output'
 import type { Prompts } from '../src/core/prompts'
+import { CLI_VERSION } from '../src/core/version'
 
 const KEY = `dblab_ab12cd34_${'A'.repeat(43)}`
 const URL = 'http://localhost:4000'
@@ -55,6 +57,51 @@ function okFetch() {
 const rejectWith = (status: number): typeof fetch =>
   (async () => new Response('{}', { status })) as unknown as typeof fetch
 
+interface McpCall {
+  method: string
+  url: string
+  sessionId?: string | null
+}
+
+/**
+ * 假 /mcp：走完 initialize → notifications/initialized → tools/call 三段，
+ * 并记下每一步带的会话头——工具调用必须带上 initialize 回的那个 id。
+ */
+function fakeMcpDatasources(
+  items: Array<Record<string, unknown>>,
+  options: { initStatus?: number; omitStructured?: boolean } = {},
+) {
+  const calls: McpCall[] = []
+  const impl = vi.fn(async (url: string, init?: RequestInit) => {
+    if (init?.method === 'DELETE') return new Response(null, { status: 204 })
+
+    const body = JSON.parse(String(init?.body)) as { method?: string }
+    const headers = (init?.headers ?? {}) as Record<string, string>
+    calls.push({ method: body.method ?? '?', url, sessionId: headers['mcp-session-id'] })
+
+    if (body.method === 'initialize') {
+      if (options.initStatus !== undefined) return new Response('{}', { status: options.initStatus })
+      return new Response(
+        JSON.stringify({ jsonrpc: '2.0', id: 1, result: { serverInfo: { name: 'dblab', version: '0.1.0' } } }),
+        { status: 200, headers: { 'content-type': 'application/json', 'mcp-session-id': 'sess-9' } },
+      )
+    }
+    if (body.method === 'notifications/initialized') return new Response(null, { status: 202 })
+
+    const payload = { items }
+    const result = {
+      content: [{ type: 'text', text: JSON.stringify(payload) }],
+      ...(options.omitStructured ? {} : { structuredContent: payload }),
+    }
+    return new Response(JSON.stringify({ jsonrpc: '2.0', id: 2, result }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+  }) as unknown as typeof fetch
+
+  return { impl, calls }
+}
+
 let home: string
 
 beforeEach(async () => {
@@ -93,7 +140,7 @@ describe('参数与用法', () => {
   it('--version 输出版本号', async () => {
     const { code, stdout } = await run(['--version'])
     expect(code).toBe(0)
-    expect(stdout.trim()).toBe('0.1.0')
+    expect(stdout.trim()).toBe(CLI_VERSION)
   })
 
   it('未知命令返回 2', async () => {
@@ -287,6 +334,7 @@ describe('setup 向导', () => {
     const servers = await readMcpServers(join(home, '.cursor/mcp.json'))
     expect(servers.dblab).toBeDefined()
     expect(text()).not.toContain(KEY)
+    expect((await loadConnection(home))?.key).toBe(KEY)
   })
 
   it('密钥校验失败且用户不重试时抛错（不写文件）', async () => {
@@ -328,5 +376,128 @@ describe('setup 向导', () => {
     const code = await runSetup(ctx, { prompts: makePrompts({ confirm: async () => false }) })
     expect(code).toBe(0)
     expect(await readFile(path, 'utf8')).toBe('{}\n')
+  })
+})
+
+describe('连接记录', () => {
+  it('connect 成功后记下这把密钥与这个地址', async () => {
+    await seed('.cursor/mcp.json', '{}\n')
+    const { code, stdout } = await run(['connect', '--url', URL, '--key', KEY], { fetchImpl: okFetch() })
+
+    expect(code).toBe(0)
+    expect(stdout).toContain('已记录本机连接')
+    expect(stdout).not.toContain(KEY)
+    const stored = await loadConnection(home)
+    expect(stored?.key).toBe(KEY)
+    expect(stored?.url).toBe(`${URL}/mcp`)
+  })
+
+  it('--dry-run 只是预览，不留记录', async () => {
+    await seed('.cursor/mcp.json', '{}\n')
+    const { code } = await run(['connect', '--url', URL, '--key', KEY, '--dry-run'])
+
+    expect(code).toBe(0)
+    expect(await loadConnection(home)).toBeNull()
+  })
+
+  it('整体断开清掉记录，按 --agents 只摘一家时保留', async () => {
+    await seed('.cursor/mcp.json', '{}\n')
+    await seed('.claude.json', '{}\n')
+    await run(['connect', '--url', URL, '--key', KEY], { fetchImpl: okFetch() })
+
+    const partial = await run(['disconnect', '--agents', 'cursor'])
+    expect(partial.code).toBe(0)
+    expect(partial.stdout).not.toContain('已清除本机连接记录')
+    expect((await loadConnection(home))?.key).toBe(KEY)
+
+    const full = await run(['disconnect'])
+    expect(full.code).toBe(0)
+    expect(full.stdout).toContain('已清除本机连接记录')
+    expect(await loadConnection(home)).toBeNull()
+  })
+})
+
+describe('datasource list', () => {
+  it('以密钥身份连 /mcp，列出读写权限', async () => {
+    const mcp = fakeMcpDatasources([
+      { name: 'orders', engine: 'postgres', database: 'orders_db', canRead: true, canWrite: false },
+      { name: 'staging', engine: 'mysql', database: 'stg', canRead: false, canWrite: true },
+    ])
+    const { code, stdout } = await run(['datasource', 'list', '--url', URL, '--key', KEY], {
+      fetchImpl: mcp.impl,
+    })
+
+    expect(code).toBe(0)
+    expect(stdout).toContain('orders')
+    expect(stdout).toContain('只读')
+    expect(stdout).toContain('只写')
+    expect(stdout).toContain('dblab_ab12cd34_••••')
+    expect(stdout).not.toContain(KEY)
+
+    // 工具调用必须发生在完整握手之后，且带上 initialize 回传的会话 id
+    expect(mcp.calls.map((call) => call.method)).toEqual([
+      'initialize',
+      'notifications/initialized',
+      'tools/call',
+    ])
+    expect(mcp.calls[2]?.sessionId).toBe('sess-9')
+    expect(mcp.calls[0]?.url).toBe(`${URL}/mcp`)
+  })
+
+  it('没有 structuredContent 时退回 content 里的那份 JSON', async () => {
+    const mcp = fakeMcpDatasources(
+      [{ name: 'orders', engine: 'postgres', database: 'd', canRead: true, canWrite: true }],
+      { omitStructured: true },
+    )
+    const { code, stdout } = await run(['datasource', 'list', '--url', URL, '--key', KEY], {
+      fetchImpl: mcp.impl,
+    })
+
+    expect(code).toBe(0)
+    expect(stdout).toContain('读+写')
+  })
+
+  it('一把权限都没有时是提示而不是失败', async () => {
+    const mcp = fakeMcpDatasources([])
+    const { code, stdout, stderr } = await run(['datasource', 'list', '--url', URL, '--key', KEY], {
+      fetchImpl: mcp.impl,
+    })
+
+    expect(code).toBe(0)
+    expect(`${stdout}${stderr}`).toContain('没有任何数据源权限')
+  })
+
+  it('密钥被拒时退出码 1', async () => {
+    const mcp = fakeMcpDatasources([], { initStatus: 401 })
+    const { code, stderr } = await run(['datasource', 'list', '--url', URL, '--key', KEY], {
+      fetchImpl: mcp.impl,
+    })
+
+    expect(code).toBe(1)
+    expect(stderr).toContain('密钥无效')
+  })
+
+  it('省略 --key 时用记录里的密钥与地址', async () => {
+    await saveConnection(home, { url: 'http://localhost:4100', key: KEY })
+    const mcp = fakeMcpDatasources([
+      { name: 'orders', engine: 'postgres', database: 'd', canRead: true, canWrite: false },
+    ])
+    const { code, stdout } = await run(['datasource', 'list'], { fetchImpl: mcp.impl })
+
+    expect(code).toBe(0)
+    expect(mcp.calls[0]?.url).toBe('http://localhost:4100/mcp')
+    expect(stdout).toContain('本机连接记录')
+  })
+
+  it('没有记录又没给 --key 时报用法错误', async () => {
+    const { code, stderr } = await run(['datasource', 'list'])
+    expect(code).toBe(2)
+    expect(stderr).toContain('缺少 --key')
+  })
+
+  it('未知的子命令报用法错误，且不去连服务', async () => {
+    const { code, stderr } = await run(['datasource', 'remove'])
+    expect(code).toBe(2)
+    expect(stderr).toContain('未知的 datasource 子命令')
   })
 })

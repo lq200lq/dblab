@@ -1,4 +1,5 @@
 import { buildEntry, type McpEntry } from '../adapters/types'
+import { connectionConfigPath, saveConnection } from '../core/connection-store'
 import { assertApiKeyShape, maskKey } from '../core/key'
 import { normalizeMcpUrl } from '../core/url'
 import { validateApiKey } from '../core/validate'
@@ -76,6 +77,12 @@ export async function runConnect(ctx: CommandContext, options: ConnectOptions): 
     ctx.out.plain(`  ${target.adapter.displayName}  ${ACTION_LABEL[result.action]}  ${result.path}`)
     if (result.backupPath) ctx.out.plain(`    备份：${result.backupPath}`)
   }
+
+  // 记完客户端再落这份记录：dry-run 走不到这里，所以它永远不会写盘。
+  await saveConnection(ctx.homeDir, { url: mcpUrl, key: apiKey })
+  ctx.out.plain('')
+  ctx.out.plain(`已记录本机连接：${maskKey(apiKey)} → ${mcpUrl}`)
+  ctx.out.plain(`  ${connectionConfigPath(ctx.homeDir)}`)
   ctx.out.plain('')
   ctx.out.plain('重启对应的 Agent 客户端即可加载 dblab 工具。')
   return 0
