@@ -8,7 +8,7 @@
     "node": ">=20"
   },
   "bin": {
-    "dblab": "./dist/index.js"
+    "dblab": "dist/index.js"
   },
   "files": [
     "dist"
