@@ -1,9 +1,9 @@
 {
-  "name": "dblab",
+  "name": "dblab-monorepo",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "DbLab — 面向 Agent 的数据库 MCP 管控平台",
+  "description": "DbLab — 面向 Agent 的数据库 MCP 管控平台（monorepo 根）",
   "engines": {
     "node": ">=20"
   },

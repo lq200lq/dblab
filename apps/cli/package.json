@@ -1,9 +1,9 @@
 {
-  "name": "@dblab/cli",
+  "name": "dblab",
   "version": "0.1.0",
   "description": "DbLab CLI — 扫描本机 Agent 并一键写入 MCP 配置",
   "type": "module",
-  "license": "UNLICENSED",
+  "license": "Apache-2.0",
   "engines": {
     "node": ">=20"
   },
@@ -13,14 +13,27 @@
   "files": [
     "dist"
   ],
-  "publishConfig": {
-    "access": "public"
+  "keywords": [
+    "dblab",
+    "mcp",
+    "database",
+    "agent",
+    "cli"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lq200lq/dblab.git"
+  },
+  "homepage": "https://github.com/lq200lq/dblab#readme",
+  "bugs": {
+    "url": "https://github.com/lq200lq/dblab/issues"
   },
   "scripts": {
     "build": "tsup",
     "dev": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "prepublishOnly": "pnpm test && pnpm typecheck && pnpm build"
   },
   "dependencies": {
     "@inquirer/prompts": "^8.7.3",

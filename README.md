@@ -125,12 +125,23 @@ pnpm dblab datasource --name orders --engine postgres --database orders_db \
 密钥明文会落到这些配置文件里（这是各客户端的既有形态），CLI 自己不做持久化。
 所有输出里的密钥一律脱敏成 `dblab_<定位段>_••••`。
 
-`apps/cli` 是可发布的 npm 包（`bin: dblab`）：
+CLI 是仓库里 `apps/cli` 这个包，发布到 npm 后就叫 **`dblab`**：
 
 ```bash
-pnpm --filter @dblab/cli build      # 产物 dist/index.js
-cd apps/cli && npm pack --dry-run
+npm install -g dblab     # 之后直接用 dblab setup / dblab scan ...
+npx dblab scan           # 或者不装，直接跑
 ```
+
+在本仓库里开发与打包：
+
+```bash
+pnpm --filter dblab build      # 产物 dist/index.js（带 shebang）
+pnpm --filter dblab test
+cd apps/cli && npm pack --dry-run   # 只应含 dist/、LICENSE、README、package.json
+```
+
+> 根包名是 `dblab-monorepo`，不叫 `dblab`：两者同名会让 `pnpm --filter dblab`
+> 同时匹配到根和 `apps/cli`，构建与发布时打错对象。
 
 ### 手工配置（兜底）
 
@@ -265,7 +276,7 @@ cookie 会话不用为跨源再开 CORS。SPA 路由回退只对无扩展名的�
 pnpm typecheck              # 各包 tsc / vue-tsc
 pnpm test                   # 未设下面两个变量时，需要活库的用例整体跳过
 pnpm --filter @dblab/web build
-pnpm --filter @dblab/cli test      # CLI 单测全部注入临时 home，不碰真实用户配置
+pnpm --filter dblab test      # CLI 单测全部注入临时 home，不碰真实用户配置
 ```
 
 跑需要真实库的用例时给两个测试库（都是本机 PostgreSQL）：
